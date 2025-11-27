@@ -8,14 +8,18 @@ from sqlalchemy.dialects.sqlite import TEXT
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
+# --- CONFIGURAÇÃO DO BANCO DE DADOS ---
 SQLALCHEMY_DATABASE_URL = "sqlite:///./contatos.db"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# --- MODELO DE BANCO DE DADOS (ORM) ---
 class ContatoDB(Base):
     __tablename__ = "contatos"
+
+    # ID deve ser UUID 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     nome = Column(String, nullable=False)
     nascimento = Column(Date, nullable=False)
@@ -23,8 +27,12 @@ class ContatoDB(Base):
     telefone = Column(String, nullable=True)
     endereco = Column(String, nullable=True)
 
+# Cria as tabelas no banco
 Base.metadata.create_all(bind=engine)
 
+# --- SCHEMAS  ---
+
+# Schema Base (Dados comuns)
 class ContatoBase(BaseModel):
     nome: str
     nascimento: date
@@ -32,20 +40,27 @@ class ContatoBase(BaseModel):
     telefone: Optional[str] = None
     endereco: Optional[str] = None
 
+# Schema para Criação (POST)
 class ContatoCreate(ContatoBase):
     pass
+
+# Schema para Resposta (GET) - Inclui ID e Idade Calculada
 class ContatoResponse(ContatoBase):
     id: str
-  @computed_field
+    
+    # Retornar idade calculada 
+    @computed_field
     def idade(self) -> int:
         hoje = date.today()
+        # Lógica do cálculo de idade
         return hoje.year - self.nascimento.year - (
             (hoje.month, hoje.day) < (self.nascimento.month, self.nascimento.day)
         )
 
     class Config:
-        from_attributes = True
+        from_attributes = True # Permite ler dados do ORM
 
+# --- DEPENDÊNCIAS ---
 def get_db():
     db = SessionLocal()
     try:
@@ -53,8 +68,12 @@ def get_db():
     finally:
         db.close()
 
-  app = FastAPI(title="API de Gerenciamento de Contatos")
+# --- INICIALIZAÇÃO DA API ---
+app = FastAPI(title="API de Gerenciamento de Contatos")
 
+# --- ENDPOINTS ---
+
+# Cadastro de Contato
 @app.post("/contatos", response_model=ContatoResponse, status_code=status.HTTP_201_CREATED) # 
 def criar_contato(contato: ContatoCreate, db: Session = Depends(get_db)):
     novo_contato = ContatoDB(**contato.model_dump())
@@ -63,18 +82,24 @@ def criar_contato(contato: ContatoCreate, db: Session = Depends(get_db)):
     db.refresh(novo_contato)
     return novo_contato
 
+# Listagem de Contatos
 @app.get("/contatos", response_model=List[ContatoResponse])
 def listar_contatos(db: Session = Depends(get_db)):
+    # Ordenados alfabeticamente pelo Nome 
     contatos = db.query(ContatoDB).order_by(ContatoDB.nome.asc()).all()
     return contatos
 
+# Atualização de Contato
 @app.put("/contatos/{contato_id}", response_model=ContatoResponse)
 def atualizar_contato(contato_id: str, dados_atualizados: ContatoCreate, db: Session = Depends(get_db)):
+    # Busca o contato
     contato_existente = db.query(ContatoDB).filter(ContatoDB.id == contato_id).first()
-
+    
+    # Caso ID não exista, retorna 404 
     if not contato_existente:
         raise HTTPException(status_code=404, detail="Contato não encontrado")
     
+    # Atualiza os campos
     contato_existente.nome = dados_atualizados.nome
     contato_existente.nascimento = dados_atualizados.nascimento
     contato_existente.email = dados_atualizados.email
@@ -85,10 +110,12 @@ def atualizar_contato(contato_id: str, dados_atualizados: ContatoCreate, db: Ses
     db.refresh(contato_existente)
     return contato_existente
 
+# Exclusão de Contato
 @app.delete("/contatos/{contato_id}", status_code=status.HTTP_204_NO_CONTENT)
 def deletar_contato(contato_id: str, db: Session = Depends(get_db)):
     contato_existente = db.query(ContatoDB).filter(ContatoDB.id == contato_id).first()
     
+    # Caso ID não exista, retorna 404
     if not contato_existente:
         raise HTTPException(status_code=404, detail="Contato não encontrado")
     
